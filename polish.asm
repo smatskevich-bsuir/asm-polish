@@ -1,8 +1,10 @@
 .286
 .model small
 .stack 100h
+opseg segment
+    retf
+opseg ends
 .data
-    ;input_string db '5-6*10$'
     input_string db 256 dup('$')
 
     num_stack dw 256 dup(0)
@@ -18,6 +20,14 @@
     parse_warn_msg db 'Neither digit or allowed operator encountered. Result may be unexpected. Allowed operators: + - * /$'
     done_msg       db 'Done!$'
     endl         db 10, 13, '$'
+
+    op_addr dw 0, 0
+    op_epb dw 0, 0
+
+    op_add_fname db 'build/opadd.exe', 0
+    op_sub_fname db 'build/opsub.exe', 0
+    op_mul_fname db 'build/opmul.exe', 0
+    op_div_fname db 'build/opdiv.exe', 0
 .code
 main:
     mov ax, @data
@@ -46,14 +56,24 @@ main:
     
     parsed_string: 
 
+    ;prepare overlay variables
+    mov ax, @data
+    mov es, ax
+    mov ax, opseg  
+    mov [op_epb], ax 
+    mov [op_epb + 2], ax
+    mov [op_addr + 2], ax
+
     call process_string
 
+    ;take last number from stack
     sub num_stack_last, 2     
     mov si, offset num_stack
     add si, num_stack_last
     mov bx, [si]
     mov num_buf, bx
 
+    ;num_buf itoa
     push 0
     mov di, offset num_buf
     push di
@@ -239,6 +259,15 @@ main:
         mov si, offset op_stack
         add si, op_stack_last
         mov cl, [si]
+
+        ;prepare values 
+        push 0
+        push ax
+        push bx
+
+        ;prepare overlay
+        mov bx, offset op_epb
+        mov ax, 4B03h
         
         cmp cl, '+'
         je operator_add  
@@ -251,8 +280,19 @@ main:
         
         cmp cl, '/'
         je operator_div      
-        
+
         push_result:
+        ;load overlay
+        int 21h 
+
+        ;call overlay
+        call DWORD PTR op_addr 
+
+        ;get values
+        pop bx
+        pop ax
+        pop ax
+        
         mov si, offset num_stack
         add si, num_stack_last
         mov [si], ax 
@@ -262,27 +302,25 @@ main:
     ret   
     
     operator_add:
-        add ax, bx
+        mov dx, offset op_add_fname
         jmp push_result  
         popa
     ret 
     
     operator_sub:
-        sub ax, bx
+        mov dx, offset op_sub_fname
         jmp push_result 
         popa
     ret   
     
     operator_mul:
-        xor dx, dx
-        imul bx 
+        mov dx, offset op_mul_fname
         jmp push_result 
         popa
     ret   
     
     operator_div:
-        xor dx, dx
-        idiv bx 
+        mov dx, offset op_div_fname
         jmp push_result 
         popa
     ret
